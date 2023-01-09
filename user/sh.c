@@ -57,6 +57,8 @@ struct cmd *parsecmd(char*);
 void
 runcmd(struct cmd *cmd)
 {
+  // here parent is shell's child
+  // have the di gui, the pipecmd's left and right is possibly all cmd
   int p[2];
   struct backcmd *bcmd;
   struct execcmd *ecmd;
@@ -75,12 +77,19 @@ runcmd(struct cmd *cmd)
     ecmd = (struct execcmd*)cmd;
     if(ecmd->argv[0] == 0)
       exit(1);
+    // argv end with NULL
     exec(ecmd->argv[0], ecmd->argv);
+
+    // shouldn't to here if exec success
     fprintf(2, "exec %s failed\n", ecmd->argv[0]);
     break;
 
   case REDIR:
     rcmd = (struct redircmd*)cmd;
+    // close the fd, then open fd at the smallest fd
+    // only child,because the child copy the parent's fds
+    //       can't change parent't fds
+    //       so fork and exec seperate
     close(rcmd->fd);
     if(open(rcmd->file, rcmd->mode) < 0){
       fprintf(2, "open %s failed\n", rcmd->file);
@@ -97,26 +106,54 @@ runcmd(struct cmd *cmd)
     runcmd(lcmd->right);
     break;
 
+  // the shell's child will create two another process, the parent(shell's child) is to shared the pipe to child
   case PIPE:
     pcmd = (struct pipecmd*)cmd;
+    // syscall pipe => parent apply the pipe service(ipc)
     if(pipe(p) < 0)
       panic("pipe");
+
+
     if(fork1() == 0){
+      // before |  ,   left
+      // one child  =>  stdout -> p[1]
       close(1);
+
+      // p[1] copy to 1 (the smallest one)
       dup(p[1]);
+
+      // close the child's p[0](not input to pipe) p[1](already copy)
       close(p[0]);
       close(p[1]);
-      runcmd(pcmd->left);
+      runcmd(pcmd->left); // left cmd
     }
+
     if(fork1() == 0){
+      // after |  ,   right
+      // another child
       close(0);
+      // p[0] copy to 0 (the smallest one)
       dup(p[0]);
+
+      // close the child's p[1](not output to pipe) p[0](already copy)
       close(p[0]);
       close(p[1]);
-      runcmd(pcmd->right);
+      runcmd(pcmd->right); // right cmd
     }
+
+    // child exec fail, 
+    //      left    0 stdin    1 p[1]
+    //      right   0 p[0]     1 stdout
+
+    // child p[0] p[1], one of the one is closed, close again will return -1
+
+    // all fd refer to the pipe was released, the pipe will be destroyed by the os 
+
+    // parent close its p[0] p[1]
     close(p[0]);
     close(p[1]);
+
+    // child wait if it haven't a child, will return -1, no care
     wait(0);
     wait(0);
     break;
@@ -127,6 +164,8 @@ runcmd(struct cmd *cmd)
       runcmd(bcmd->cmd);
     break;
   }
+
+  // the parent and all child will exit, never return to shell
   exit(0);
 }
 
@@ -136,6 +175,7 @@ getcmd(char *buf, int nbuf)
   fprintf(2, "$ ");
   memset(buf, 0, nbuf);
   gets(buf, nbuf);
+  // empty string
   if(buf[0] == 0) // EOF
     return -1;
   return 0;
@@ -148,6 +188,7 @@ main(void)
   int fd;
 
   // Ensure that three file descriptors are open.
+  // shell ensure every process have the stdin stdout stderr
   while((fd = open("console", O_RDWR)) >= 0){
     if(fd >= 3){
       close(fd);
@@ -157,6 +198,8 @@ main(void)
 
   // Read and run input commands.
   while(getcmd(buf, sizeof(buf)) >= 0){
+    // if command is cd, it should change the shell process's current directory
+    //       but if run cd as a command, only child process' cur dir is changed, the shell's cur dir is always not changed 
     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
       // Chdir must be called by the parent, not the child.
       buf[strlen(buf)-1] = 0;  // chop \n
@@ -164,10 +207,17 @@ main(void)
         fprintf(2, "cannot cd %s\n", buf+3);
       continue;
     }
+ 
     if(fork1() == 0)
+     // child => execve can't should return to here
+
       runcmd(parsecmd(buf));
+    
+    // parent
     wait(0);
   }
+
+  // input eof => read first return 0 or -1, as  a result, gets return "\0"
   exit(0);
 }
 
@@ -178,6 +228,7 @@ panic(char *s)
   exit(1);
 }
 
+// wrap fork, add the function: panic fork
 int
 fork1(void)
 {

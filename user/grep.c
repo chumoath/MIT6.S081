@@ -7,6 +7,7 @@
 char buf[1024];
 int match(char*, char*);
 
+/* very clever */
 void
 grep(char *pattern, int fd)
 {
@@ -45,11 +46,13 @@ main(int argc, char *argv[])
   }
   pattern = argv[1];
 
+  // only have grep pattern
   if(argc <= 2){
     grep(pattern, 0);
     exit(0);
   }
 
+  // have grep pattern file1 file2...
   for(i = 2; i < argc; i++){
     if((fd = open(argv[i], 0)) < 0){
       printf("grep: cannot open %s\n", argv[i]);

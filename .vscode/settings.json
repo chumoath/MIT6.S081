@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "\"*.cpp\"": "\"c++\"",
+        "types.h": "c",
+        "user.h": "c",
+        "stat.h": "c",
+        "syscall.h": "c",
+        "typeinfo": "c",
+        "fs.h": "c",
+        "fcntl.h": "c"
+    }
+}

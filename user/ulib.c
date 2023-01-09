@@ -57,15 +57,22 @@ gets(char *buf, int max)
 {
   int i, cc;
   char c;
+  // i + 1  ensure the lastest can fill \0
+  // if i+1 = max, quit loop;  i = ?, represent already read ? bytes
 
+  // 不变式：i always at the unread byte
   for(i=0; i+1 < max; ){
     cc = read(0, &c, 1);
     if(cc < 1)
       break;
     buf[i++] = c;
+    
+    // buf contain \n
     if(c == '\n' || c == '\r')
       break;
   }
+
+  // loop body ensure i is correctable position when quit loop
   buf[i] = '\0';
   return buf;
 }
