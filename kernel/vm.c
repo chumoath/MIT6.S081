@@ -213,14 +213,15 @@ uvmcreate()
 void
 uvminit(pagetable_t pagetable, uchar *src, uint sz)
 {
-  char *mem;
+  char *mem;                                                                // mem, physical address (pa)
 
   if(sz >= PGSIZE)
     panic("inituvm: more than a page");
-  mem = kalloc();
+  mem = kalloc();                                                           // alloc physical memory
   memset(mem, 0, PGSIZE);
-  mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
-  memmove(mem, src, sz);
+  mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);     // 0 => virtual address (va)    map pa to va (0) one page, the page table is already alloced when alloc pid
+  memmove(mem, src, sz);                                                    // copy src to mem (the size of initCode) without overlap
+                                                                            // the paging haven't been opened, mem and src are both physical address
 }
 
 // Allocate PTEs and physical memory to grow process from oldsz to

@@ -208,7 +208,7 @@ uchar initcode[] = {
 };
 
 // Set up first user process.
-void
+void // the paging haven't been opened
 userinit(void)
 {
   struct proc *p;
@@ -218,7 +218,7 @@ userinit(void)
   
   // allocate one user page and copy init's instructions
   // and data into it.
-  uvminit(p->pagetable, initcode, sizeof(initcode));
+  uvminit(p->pagetable, initcode, sizeof(initcode));   // copy initCode to physical addr, and mapped to vaddr 0 of the process
   p->sz = PGSIZE;
 
   // prepare for the very first "return" from kernel to user.
@@ -267,7 +267,7 @@ fork(void)
     return -1;
   }
 
-  // Copy user memory from parent to child.
+  // Copy user memory from parent to child.   only copy page_table, not copy pcb, pcb need to revise manually
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
@@ -276,6 +276,9 @@ fork(void)
   np->sz = p->sz;
 
   np->parent = p;
+  
+  // copy the trace_mask
+  np->trace_mask = p->trace_mask;
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -692,4 +695,15 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+
+uint64 get_nproc(void){
+  struct proc *p;
+  uint64 num = 0;
+  
+  for(p = proc; p < &proc[NPROC]; ++p)
+    if(p->state != UNUSED) ++num;
+  
+  return num;
 }

@@ -4,7 +4,13 @@
 # 
 # Save current registers in old. Load from new.	
 
+# callee    callee must store before use, the caller can use directly after call
+#           ra is a exception, it is the return address of swtch
+#                    the scheduler store the ra of the user of call scheduler, then call swtch, set ra to beghind swtch
+#                    by store this ra to proc, the process can resume when it will be scheduled again
 
+#          s* is the register that callee must store before use
+#                 because the caller can use directly (the value before call) after call and no need to store before call
 .globl swtch
 swtch:
         sd ra, 0(a0)
@@ -22,8 +28,9 @@ swtch:
         sd s10, 96(a0)
         sd s11, 104(a0)
 
-        ld ra, 0(a1)
-        ld sp, 8(a1)
+        ld ra, 0(a1)                # new process, p->context.ra = (uint64)forkret;      proc.c  allocproc
+                                    # set the spec to p->trapfram->epc(exec will set or munually set), the sret will use spec when from supervison to user        
+        ld sp, 8(a1)                # new process, p->context.sp = p->kstack + PGSIZE;  so ret will return to somewhere in kernel
         ld s0, 16(a1)
         ld s1, 24(a1)
         ld s2, 32(a1)

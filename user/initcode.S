@@ -5,6 +5,9 @@
 
 # exec(init, argv)
 .globl start
+        # arg     a0 - a6
+        # sysnum  a7
+        # ecall => uservec => usertrap => syscall (returnval store to p->trapframe->a0, userstack)
 start:
         la a0, init
         la a1, argv

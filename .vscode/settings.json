@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "\"*.cpp\"": "\"c++\"",
+        "proc.h": "c",
+        "defs.h": "c",
+        "memlayout.h": "c"
+    }
+}

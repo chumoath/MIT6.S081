@@ -347,7 +347,7 @@ sfence_vma()
 // one beyond the highest possible virtual address.
 // MAXVA is actually one bit less than the max allowed by
 // Sv39, to avoid having to sign-extend virtual addresses
-// that have the high bit set.
+// that have the high bit set. performance mmu need to fill 1, then be truncated hardware(physical memory)
 #define MAXVA (1L << (9 + 9 + 9 + 12 - 1))
 
 typedef uint64 pte_t;

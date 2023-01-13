@@ -95,3 +95,18 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+// set the proc's 
+// the syscall() only get the a7 to call sys_, don't get arguments
+uint64
+sys_trace(void)
+{
+  // get argument
+  int mask;
+  if(argint(0, &mask) < 0)
+    return -1;
+  
+  myproc()->trace_mask = mask;
+  return 0;
+  // if pass a addr, must use the provied function, because the kernel page_table and the user is not same
+}

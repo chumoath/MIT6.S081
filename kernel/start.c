@@ -16,7 +16,7 @@ uint64 mscratch0[NCPU * 32];
 // assembly code in kernelvec.S for machine-mode timer interrupt.
 extern void timervec();
 
-// entry.S jumps here in machine mode on stack0.
+// entry.S jumps here in machine mode on stack0. only execute in machine-mode, then switch to supervisor mode
 void
 start()
 {
@@ -45,8 +45,8 @@ start()
   int id = r_mhartid();
   w_tp(id);
 
-  // switch to supervisor mode and jump to main().
-  asm volatile("mret");
+  // switch to supervisor mode and jump to main().   be configured at w_mepc, mret will set pc from mepc register
+  asm volatile("mret");   // not return, because of setting the pc directly
 }
 
 // set up to receive timer interrupts in machine mode,

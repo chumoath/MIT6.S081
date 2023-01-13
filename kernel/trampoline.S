@@ -11,6 +11,7 @@
 	.section trampsec
 .globl trampoline
 trampoline:
+        # 80007000 => 3ffffff000
 .align 4
 .globl uservec
 uservec:    
@@ -86,6 +87,7 @@ uservec:
 
 .globl userret
 userret:
+        # 80007090 => 3ffffff090
         # userret(TRAPFRAME, pagetable)
         # switch from kernel to user.
         # usertrapret() calls here.
@@ -138,4 +140,4 @@ userret:
         
         # return to user mode and user pc.
         # usertrapret() set up sstatus and sepc.
-        sret
+        sret    # the epc will be set to 0 (the epc) 

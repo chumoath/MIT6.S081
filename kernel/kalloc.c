@@ -20,7 +20,7 @@ struct run {
 
 struct {
   struct spinlock lock;
-  struct run *freelist;
+  struct run *freelist;       // global variable, static init to 0, so it is NULL. no need to set
 } kmem;
 
 void
@@ -44,7 +44,7 @@ freerange(void *pa_start, void *pa_end)
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
 void
-kfree(void *pa)
+kfree(void *pa)           // add page to the free-list, insertHead
 {
   struct run *r;
 
@@ -79,4 +79,18 @@ kalloc(void)
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+
+// freemem   physical memory, the kernel mapped to physical addr, the rest fo mem is behind the kernel
+// total physical mem : 128MB    KERNELBASE is the load addr of the kernel
+uint64 get_freemem(void){
+  struct run * free = kmem.freelist;
+  uint64 num = 0;
+  while(free){
+    ++num;
+    free = free->next;
+  }
+
+  return (num * PGSIZE);
 }

@@ -28,7 +28,12 @@ main()
     iinit();         // inode cache
     fileinit();      // file table
     virtio_disk_init(); // emulated hard disk
-    userinit();      // first user process
+    userinit();      // first user process     the paging haven't been opened, so can setting pagetable of process, but cann't use the vmaddr(only can set pagetable)
+                                               // only set the first user process at physical addr, haven't set the paging
+                                               // the forkret set the userret, it is the vaddr, and the process will run when paging open
+                                               // so, beakpoint should break at the lastest page of the vaddr
+                                               // the hardware supports 39bit, the xv6 use 38bit to avoid sign-extension when 39th bit is signed, the mmu extent it to 64bit, and the hardware truncate it to 39bit
+                                               //           to performance
     __sync_synchronize();
     started = 1;
   } else {

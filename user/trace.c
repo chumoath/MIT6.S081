@@ -14,11 +14,14 @@ main(int argc, char *argv[])
     exit(1);
   }
 
+  // set some syscalls to trace
   if (trace(atoi(argv[1])) < 0) {
     fprintf(2, "%s: trace failed\n", argv[0]);
     exit(1);
   }
   
+  // exec 
+  //   argv[0]: grep   argv[...] hello README
   for(i = 2; i < argc && i < MAXARG; i++){
     nargv[i-2] = argv[i];
   }

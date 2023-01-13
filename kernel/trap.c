@@ -124,8 +124,9 @@ usertrapret(void)
   // jump to trampoline.S at the top of memory, which 
   // switches to the user page table, restores user registers,
   // and switches to user mode with sret.
-  uint64 fn = TRAMPOLINE + (userret - trampoline);
-  ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);
+  uint64 fn = TRAMPOLINE + (userret - trampoline);  // trampoline.S is the lastest page of the entire vaddr，trampoline is the begin addr of the page, userret is the function that we will call
+                                                    // fn is the fucntion addr that the lastest page addr + the offset from begin to userret
+  ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);   // call the userret
 }
 
 // interrupts and exceptions from kernel code go here via kernelvec,
