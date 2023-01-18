@@ -37,6 +37,7 @@ trapinithart(void)
 void
 usertrap(void)
 {
+
   int which_dev = 0;
   
   // vmprint(myproc()->kernel_pagetable);
@@ -49,7 +50,8 @@ usertrap(void)
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
-  
+
+
   // save user program counter.
   p->trapframe->epc = r_sepc();
   // machine exception program counter, holds the

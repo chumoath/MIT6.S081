@@ -118,6 +118,9 @@ found:
     return 0;
   }
 
+
+  // user's pagetable
+
   // An empty user page table.
   //    alloc a root pagetable
   //    map trampoline, trapframe
@@ -128,14 +131,21 @@ found:
     return 0;
   }
 
+
+  // user's kernel pagetable
+
   // copy global kernel page table
   u_cpy_global_kernel_pagetable(&p->kernel_pagetable);
+
+
+
+
+  // kstack
 
   // alloc the kstack
   char *pa = kalloc();
   if(pa == 0)
     panic("kalloc");
-
 
   // kstack is at the user's kernel pagetable, and the va is equals to when it is in global kernel pagetable
   uint64 va = KSTACK((int) (p - proc));
@@ -156,6 +166,8 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  // avoid init randomly, cause free_kernel's global pagetable fail
+  p->sz = 0;
   return p;
 }
 
@@ -170,6 +182,9 @@ freeproc(struct proc *p)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
 
+
+  // free user's pagetable
+
   // free userspace page and pagetable
   // free trapframe's pagetable
   // free trampoline's pagetable
@@ -180,12 +195,12 @@ freeproc(struct proc *p)
   // free kstack's page => only be mapped to user's kernel pagetable
   uint64 va = KSTACK((int) (p - proc));
   uvmunmap(p->kernel_pagetable, va, 1, 1);   // set the pte == 0;
+
   uvmunmap(kernel_pagetable, va, 1, 0);      // unmap from global kernel pagetable 
 
-
-  // free  user's kernel pagetable, only unmap 
+  // free  user's kernel pagetable, only unmap, free page-table page
   if(p->kernel_pagetable)
-    u_free_global_kernel_pagetable(p->kernel_pagetable);
+    u_free_global_kernel_pagetable(p->kernel_pagetable, p->sz);
 
   p->pagetable = 0;
   p->sz = 0;
@@ -223,7 +238,9 @@ proc_pagetable(struct proc *p)
   // map the trapframe just below TRAMPOLINE, for trampoline.S.
   if(mappages(pagetable, TRAPFRAME, PGSIZE,
               (uint64)(p->trapframe), PTE_R | PTE_W) < 0){
+
     uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    
     uvmfree(pagetable, 0);
     return 0;
   }
@@ -237,9 +254,10 @@ void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   // only unmap and free the pagetable, not free the page
+
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
-  uvmunmap(pagetable, TRAPFRAME, 1, 0);
   
+  uvmunmap(pagetable, TRAPFRAME, 1, 0);
   
   // unmap the user space, the sz is stored in proc, and free the page and the pagetable
   uvmfree(pagetable, sz);
@@ -266,14 +284,13 @@ userinit(void)
   p = allocproc();
   initproc = p;
 
-  // vmprint(p->kernel_pagetable);
-
-
-  vmprint(p->pagetable);
-
   // allocate one user page and copy init's instructions
   // and data into it.
-  uvminit(p->pagetable, initcode, sizeof(initcode));
+
+  char * pa = uvminit(p->pagetable, initcode, sizeof(initcode));
+
+  // map to user's kernel pagetable
+  ukvmmap(p->kernel_pagetable, 0, (uint64)pa, PGSIZE, PTE_R | PTE_W | PTE_X);
   p->sz = PGSIZE;
 
   // prepare for the very first "return" from kernel to user.
@@ -293,18 +310,39 @@ userinit(void)
 int
 growproc(int n)
 {
-  uint sz;
+  uint oldsz;
+  uint newsz;
   struct proc *p = myproc();
 
-  sz = p->sz;
+  oldsz = p->sz;
+  newsz = oldsz + n;
+
+  // expand mem excess the CLINT, bacause CLINT also map to user's kernel pagetable, if it is mapped to user space again, it will cause remap
+  if(newsz > PLIC)
+    return -1;
+
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if((newsz = uvmalloc(p->pagetable, oldsz, newsz)) == 0) {
       return -1;
     }
+    ukvmaddmap(p->kernel_pagetable, p->pagetable, oldsz, newsz);
   } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    newsz = uvmdealloc(p->pagetable, oldsz, newsz);
+    ukvmunmap(p->kernel_pagetable, oldsz, newsz);
   }
-  p->sz = sz;
+
+
+  // error question: inscrease's page is not map to user's kernel pagetable
+  // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  // improve, only copy the new increase's page's pagetable to improve performence
+  // if(p->sz != sz)
+  // {
+  //   uvmunmap(p->kernel_pagetable, 0, PGROUNDUP(p->sz)/PGSIZE, 0);
+  //   uvmcopymap(p->kernel_pagetable, p->pagetable, sz);
+  // }
+  p->sz = newsz;
+
   return 0;
 }
 
@@ -317,20 +355,28 @@ fork(void)
   struct proc *np;
   struct proc *p = myproc();
 
+  // first fork is init, fork to sh
+
   // Allocate process.
   if((np = allocproc()) == 0){
     return -1;
   }
-
   // Copy user memory from parent to child.
+  //        need to alloc page
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
-  np->sz = p->sz;
 
+  np->sz = p->sz;
   np->parent = p;
+
+  // other kernel pagetable was mapped when allocproc
+
+  // map the new process's user page to new process's user kernel pagetable
+  uvmcopymap(np->kernel_pagetable, np->pagetable, np->sz);
+
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -349,7 +395,6 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
-
   release(&np->lock);
 
   return pid;
@@ -482,6 +527,7 @@ wait(uint64 addr)
             return -1;
           }
           freeproc(np);
+      
           release(&np->lock);
           release(&p->lock);
           return pid;
@@ -547,8 +593,6 @@ scheduler(void)
 
         //  first:  to  forkret
         //  other:  to  schec's swtch()'s next instruction
-
-
 
 
         // here, should be the cpu thread, it is used to schedule

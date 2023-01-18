@@ -2500,9 +2500,12 @@ execout(char *s)
     if(pid < 0){
       printf("fork failed\n");
       exit(1);
-    } else if(pid == 0){
+    } 
+    // child
+    else if(pid == 0){
       // allocate all of memory.
       while(1){
+        // excess the CLINT, return -1, 0xfffffffffffffffffff => is -1
         uint64 a = (uint64) sbrk(4096);
         if(a == 0xffffffffffffffffLL)
           break;
@@ -2519,6 +2522,7 @@ execout(char *s)
       exec("echo", args);
       exit(0);
     } else {
+    // parent
       wait((int*)0);
     }
   }
@@ -2549,6 +2553,8 @@ countfree()
     exit(1);
   }
 
+
+  // child auto close the fd
   if(pid == 0){
     close(fds[0]);
     
@@ -2571,6 +2577,8 @@ countfree()
     exit(0);
   }
 
+
+  // parent
   close(fds[1]);
 
   int n = 0;
@@ -2713,6 +2721,8 @@ main(int argc, char *argv[])
         if(continuous != 2)
           exit(1);
       }
+
+
       int free1 = countfree();
       if(free1 < free0){
         printf("FAILED -- lost %d free pages\n", free0 - free1);
@@ -2723,10 +2733,14 @@ main(int argc, char *argv[])
   }
 
   printf("usertests starting\n");
+
   int free0 = countfree();
+
   int free1 = 0;
   int fail = 0;
-  for (struct test *t = tests; t->s != 0; t++) {
+  int i = 0;
+  for (struct test *t = tests; t->s != 0; t++, ++i) {
+    printf("%d\n", i);
     if((justone == 0) || strcmp(t->s, justone) == 0) {
       if(!run(t->f, t->s))
         fail = 1;

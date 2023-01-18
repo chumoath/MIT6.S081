@@ -15,7 +15,11 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.  PROVIDE can
 
 extern char trampoline[]; // trampoline.S
 
+extern int copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);
+extern int copyinstr_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
 
+
+// only pa is lianxu 
 void
 ukvmmap(pagetable_t p, uint64 va, uint64 pa, uint64 sz, int perm){
   if(mappages(p, va, sz, pa, perm) != 0)
@@ -38,7 +42,8 @@ u_cpy_global_kernel_pagetable(pagetable_t * u_kernel_pagetable){
 	ukvmmap(*u_kernel_pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
 	// CLINT
-	ukvmmap(*u_kernel_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  // not map CLINT, bacause it is much low, 0x02000000, can't sbrk 100M
+	// ukvmmap(*u_kernel_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
 	// PLIC
 	ukvmmap(*u_kernel_pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
@@ -57,7 +62,7 @@ u_cpy_global_kernel_pagetable(pagetable_t * u_kernel_pagetable){
 
 // before this, should free the kstack's page, and the rest of kernel's page shouldn't be changed
 void
-u_free_global_kernel_pagetable(pagetable_t p){
+u_free_global_kernel_pagetable(pagetable_t p, uint64 u_sz){
 
     // uart registers
   	uvmunmap(p, UART0, 1, 0);
@@ -66,16 +71,21 @@ u_free_global_kernel_pagetable(pagetable_t p){
   	uvmunmap(p, VIRTIO0, 1, 0);
 
   	// CLINT
-  	uvmunmap(p, CLINT, 0x10, 0);
+  	// uvmunmap(p, CLINT, 0x10, 0);
 
   	// PLIC
   	uvmunmap(p, PLIC, 0x400, 0);
 	
-	uvmunmap(p, KERNBASE, (PHYSTOP - KERNBASE) >> 12, 0);
+	  uvmunmap(p, KERNBASE, (PHYSTOP - KERNBASE) >> 12, 0);
 
   	// unmap the trampoline for trap entry/exit to
   	// the highest virtual address in the kernel.
+
   	uvmunmap(p, TRAMPOLINE, 1, 0);
+
+	// unmap user's kernel pagetable's user space map
+
+	uvmunmap(p, 0, PGROUNDUP(u_sz)/PGSIZE, 0);
 
   	// freewalk must assure that every the last pte is invalid
   	freewalk(p);
@@ -219,6 +229,9 @@ kvmpa(uint64 va)
 // physical addresses starting at pa. va and size might not
 // be page-aligned. Returns 0 on success, -1 if walk() couldn't
 // allocate a needed page-table page.
+
+
+// only adapt to the pyhsical space is lianxu
 int
 mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 {
@@ -285,7 +298,9 @@ uvmcreate()
 // Load the user initcode into address 0 of pagetable,
 // for the very first process.
 // sz must be less than a page.
-void
+
+// return pa, to be used by mapping to user_kernel_pagetable
+char *
 uvminit(pagetable_t pagetable, uchar *src, uint sz)
 {
   char *mem;
@@ -294,8 +309,10 @@ uvminit(pagetable_t pagetable, uchar *src, uint sz)
     panic("inituvm: more than a page");
   mem = kalloc();
   memset(mem, 0, PGSIZE);
+  // map to user page_table
   mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
   memmove(mem, src, sz);
+  return mem;
 }
 
 // Allocate PTEs and physical memory to grow process from oldsz to
@@ -305,6 +322,14 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
   char *mem;
   uint64 a;
+  
+
+  // text data guard page stack page  excess PLIC, fail
+  // CLINT mapped to user's kernel pagetable
+  // expand mem excess the CLINT, bacause CLINT also map to user's kernel pagetable, if it is mapped to user space again, it will cause remap
+
+  if(newsz > PLIC)
+	  return 0;
 
   if(newsz < oldsz)
     return oldsz;
@@ -435,6 +460,77 @@ uvmclear(pagetable_t pagetable, uint64 va)
   *pte &= ~PTE_U;
 }
 
+
+// copy map from user's page_table 's user's space to user's kernel pagetable's page_table
+// from 0 to sz
+void
+uvmcopymap(pagetable_t kernel_pagetable, pagetable_t user_pagetable, uint64 sz){
+	uint64 sz1 = PGROUNDUP(sz);
+	pte_t * pte;
+	uint64 pa;
+	int flag;
+	for(uint64 i = 0; i < sz1; i += PGSIZE){
+
+		// find pa
+		if((pte = walk(user_pagetable, i, 0)) == 0)
+			panic("uvmcopymap");
+
+		if((*pte & PTE_V) == 0)
+			panic("not mapped copy");
+		
+		// can't identify PTE_U, bacause the guard page is not PTE_U
+		// if((*pte & PTE_U) == 0)
+		// 	panic("not user page");
+
+		if(PTE_FLAGS(*pte) == PTE_V)
+			panic("not a leaf");
+
+		// map
+		pa = PTE2PA(*pte);
+		flag = PTE_FLAGS(*pte);
+		// kernel mode cann't access the page that have pte_u 
+		ukvmmap(kernel_pagetable, i, pa, PGSIZE, flag & ~PTE_U);
+	}
+}
+
+
+void ukvmaddmap(pagetable_t kernel_pagetable, pagetable_t user_pagetable, uint64 oldsz, uint64 newsz){
+  oldsz = PGROUNDUP(oldsz);
+  newsz = PGROUNDUP(newsz);
+	pte_t * pte;
+	uint64 pa;
+	int flag;
+	for(uint64 i = oldsz; i < newsz; i += PGSIZE){
+
+		// find pa
+		if((pte = walk(user_pagetable, i, 0)) == 0)
+			panic("uvmcopymap");
+
+		if((*pte & PTE_V) == 0)
+			panic("not mapped add");
+		
+		// can't identify PTE_U, bacause the guard page is not PTE_U
+		// if((*pte & PTE_U) == 0)
+		// 	panic("not user page");
+
+		if(PTE_FLAGS(*pte) == PTE_V)
+			panic("not a leaf");
+
+		// map
+		pa = PTE2PA(*pte);
+		flag = PTE_FLAGS(*pte);
+		// kernel mode cann't access the page that have pte_u 
+		ukvmmap(kernel_pagetable, i, pa, PGSIZE, flag & ~PTE_U);
+	}
+}
+
+void ukvmunmap(pagetable_t kernel_pagetable, uint64 oldsz, uint64 newsz){
+  uint64 npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+  uvmunmap(kernel_pagetable, PGROUNDUP(newsz), npages, 0); // only unmap from user's kernel page table
+}
+
+
+
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
@@ -466,23 +562,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
-
-  while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > len)
-      n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
-
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
+	return copyin_new(pagetable, dst, srcva, len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -492,40 +572,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-  uint64 n, va0, pa0;
-  int got_null = 0;
-
-  while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > max)
-      n = max;
-
-    char *p = (char *) (pa0 + (srcva - va0));
-    while(n > 0){
-      if(*p == '\0'){
-        *dst = '\0';
-        got_null = 1;
-        break;
-      } else {
-        *dst = *p;
-      }
-      --n;
-      --max;
-      p++;
-      dst++;
-    }
-
-    srcva = va0 + PGSIZE;
-  }
-  if(got_null){
-    return 0;
-  } else {
-    return -1;
-  }
+	return copyinstr_new(pagetable, dst, srcva, max);
 }
 
 static void

@@ -9,6 +9,7 @@
 
 static int loadseg(pde_t *pgdir, uint64 addr, struct inode *ip, uint offset, uint sz);
 
+// only replace user pagetable, and update the user's kernel pagetable
 int
 exec(char *path, char **argv)
 {
@@ -27,6 +28,7 @@ exec(char *path, char **argv)
     end_op();
     return -1;
   }
+
   ilock(ip);
 
   // Check ELF header
@@ -50,6 +52,8 @@ exec(char *path, char **argv)
     if(ph.vaddr + ph.memsz < ph.vaddr)
       goto bad;
     uint64 sz1;
+    // grow user's space to new seg's top addr, this addr is the user's text and data addr
+    // sz1 as the error process
     if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
     sz = sz1;
@@ -69,6 +73,7 @@ exec(char *path, char **argv)
   // Use the second as the user stack.
   sz = PGROUNDUP(sz);
   uint64 sz1;
+  
   if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
   sz = sz1;
@@ -82,6 +87,9 @@ exec(char *path, char **argv)
   stackbase = sp - PGSIZE;
 
   // Push argument strings, prepare rest of stack in ustack.
+  //            copy all str to stack
+  //            set sp to argv
+  //            ustack store the param's addr temporary
   for(argc = 0; argv[argc]; argc++) {
     if(argc >= MAXARG)
       goto bad;
@@ -89,6 +97,9 @@ exec(char *path, char **argv)
     sp -= sp % 16; // riscv sp must be 16-byte aligned
     if(sp < stackbase)
       goto bad;
+    
+    // copy str from user space (already translation to pa) to userspace
+    //          sp is va of user process
     if(copyout(pagetable, sp, argv[argc], strlen(argv[argc]) + 1) < 0)
       goto bad;
     ustack[argc] = sp;
@@ -100,12 +111,15 @@ exec(char *path, char **argv)
   sp -= sp % 16;
   if(sp < stackbase)
     goto bad;
+  
+  // copy out str's addr to user's stack
   if(copyout(pagetable, sp, (char *)ustack, (argc+1)*sizeof(uint64)) < 0)
     goto bad;
 
   // arguments to user main(argc, argv)
   // argc is returned via the system call return
   // value, which goes in a0.
+  //          new process's entry point is main, so directly a0 is the main's first param
   p->trapframe->a1 = sp;
 
   // Save program name for debugging.
@@ -122,6 +136,17 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);   // if the new pagetable ask success, then free the oldpagetable, to return from exec when exec fail
   
+  // bacause the physical address is alloced again
+  // uvmunmap 's sz is  npage
+
+
+  uvmunmap(p->kernel_pagetable, 0, PGROUNDUP(oldsz) / PGSIZE, 0); // unmap the user page in user's kernel pagetabe, only set pte = 0; can reuse
+  
+  // not use, only the physical is lianxu
+  // mappages(p->kernel_pagetable, 0, p->sz, walk);
+
+  uvmcopymap(p->kernel_pagetable, p->pagetable, sz);
+
   // print the new pagetable, 
   if(p->pid == 1)
     vmprint(p->pagetable);
