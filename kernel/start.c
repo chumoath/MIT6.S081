@@ -30,7 +30,7 @@ start()
   // requires gcc -mcmodel=medany
   w_mepc((uint64)main);
 
-  // disable paging for now.
+  // disable paging for now.    set satp to 0, 0 pa is valid
   w_satp(0);
 
   // delegate all interrupts and exceptions to supervisor mode.

@@ -5,7 +5,7 @@
 #include "defs.h"
 
 volatile static int started = 0;
-
+extern pagetable_t kernel_pagetable;
 // start() jumps here in supervisor mode on all CPUs.
 void
 main()
@@ -22,7 +22,10 @@ main()
     kinit();         // physical page allocator
     kvminit();       // create kernel page table
     kvminithart();   // turn on paging
-    procinit();      // process table
+
+    // vmprint(kernel_pagetable);   no should print kernel pagetable, bacause it mapped all available physical addr
+
+    procinit();      // process table, and turn on paging
     trapinit();      // trap vectors
     trapinithart();  // install kernel trap vector
     plicinit();      // set up interrupt controller

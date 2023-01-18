@@ -20,28 +20,33 @@ static void wakeup1(struct proc *chan);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
+extern pagetable_t kernel_pagetable;
 
-// initialize the proc table at boot time.
+// initialize the proc table at boot time.   alloc all kstack at here in kernel page_table
 void
 procinit(void)
 {
   struct proc *p;
   
   initlock(&pid_lock, "nextpid");
+
+  /* alloc kstack in allocproc()  */
+
+
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
 
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      // char *pa = kalloc();
+      // if(pa == 0)
+      //   panic("kalloc");
+      // uint64 va = KSTACK((int) (p - proc));
+      // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      // p->kstack = va;
   }
-  kvminithart();
+  kvminithart(); // switch satp to kernel_page, flush TLB
 }
 
 // Must be called with interrupts disabled,
@@ -114,12 +119,36 @@ found:
   }
 
   // An empty user page table.
+  //    alloc a root pagetable
+  //    map trampoline, trapframe
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
     freeproc(p);
     release(&p->lock);
     return 0;
   }
+
+  // copy global kernel page table
+  u_cpy_global_kernel_pagetable(&p->kernel_pagetable);
+
+  // alloc the kstack
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+
+
+  // kstack is at the user's kernel pagetable, and the va is equals to when it is in global kernel pagetable
+  uint64 va = KSTACK((int) (p - proc));
+  ukvmmap(p->kernel_pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  // put to p->kstack is va, not pa
+  p->kstack = va;
+
+  // and must map to global kernel pagetable, bacause kvmpa depend it
+  kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+
+
+
+
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -136,11 +165,28 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  // free the trapframe's page
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+
+  // free userspace page and pagetable
+  // free trapframe's pagetable
+  // free trampoline's pagetable
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+
+
+  // free kstack's page => only be mapped to user's kernel pagetable
+  uint64 va = KSTACK((int) (p - proc));
+  uvmunmap(p->kernel_pagetable, va, 1, 1);   // set the pte == 0;
+  uvmunmap(kernel_pagetable, va, 1, 0);      // unmap from global kernel pagetable 
+
+
+  // free  user's kernel pagetable, only unmap 
+  if(p->kernel_pagetable)
+    u_free_global_kernel_pagetable(p->kernel_pagetable);
+
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -159,7 +205,7 @@ proc_pagetable(struct proc *p)
 {
   pagetable_t pagetable;
 
-  // An empty page table.
+  // An empty page table.    root
   pagetable = uvmcreate();
   if(pagetable == 0)
     return 0;
@@ -190,8 +236,12 @@ proc_pagetable(struct proc *p)
 void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
+  // only unmap and free the pagetable, not free the page
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  
+  
+  // unmap the user space, the sz is stored in proc, and free the page and the pagetable
   uvmfree(pagetable, sz);
 }
 
@@ -215,7 +265,12 @@ userinit(void)
 
   p = allocproc();
   initproc = p;
-  
+
+  // vmprint(p->kernel_pagetable);
+
+
+  vmprint(p->pagetable);
+
   // allocate one user page and copy init's instructions
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
@@ -328,7 +383,7 @@ reparent(struct proc *p)
 
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
-// until its parent calls wait().
+// until its parent calls wait().     
 void
 exit(int status)
 {
@@ -467,13 +522,42 @@ scheduler(void)
     int found = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
+
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
-        c->proc = p;
+        c->proc = p;              // the cpu is executing's process
+
+
+
+        // ready to switch new process
+
+
+        // before return to scheduled process, should switch the kernel page_table, to use the process's kstack
+        //         not should the main thread's va, equals to the kstask's va, it isn't mapped
+        w_satp(MAKE_SATP(p->kernel_pagetable)); 
+        sfence_vma();          // flush TLB
+
+
+
+        // store the main thread's status, load a process's status
         swtch(&c->context, &p->context);
+
+        //  first:  to  forkret
+        //  other:  to  schec's swtch()'s next instruction
+
+
+
+
+        // here, should be the cpu thread, it is used to schedule
+        //          other process will not return here
+
+        // ready to schedule, should use kernel_pagetable to avoid no process is running
+        w_satp(MAKE_SATP(kernel_pagetable));
+        sfence_vma();   // flush TLB
+
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
@@ -481,6 +565,8 @@ scheduler(void)
 
         found = 1;
       }
+
+
       release(&p->lock);
     }
 #if !defined (LAB_FS)
@@ -517,7 +603,11 @@ sched(void)
     panic("sched interruptible");
 
   intena = mycpu()->intena;
-  swtch(&p->context, &mycpu()->context);
+  
+  // store cur process's status(cur process's kernel pagetable, but is kernel common resource), and load c->context's status (kernel)
+  swtch(&p->context, &mycpu()->context);  // use cpu's main thread to schedule
+
+
   mycpu()->intena = intena;
 }
 
@@ -604,7 +694,7 @@ wakeup(void *chan)
 }
 
 // Wake up p if it is sleeping in wait(); used by exit().
-// Caller must hold p->lock.
+// Caller must hold p->lock.                
 static void
 wakeup1(struct proc *p)
 {

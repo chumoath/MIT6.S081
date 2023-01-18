@@ -178,6 +178,12 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+void            vmprint(pagetable_t pagetable);
+void            u_cpy_global_kernel_pagetable(pagetable_t * u_kernel_pagetable);
+void            u_free_global_kernel_pagetable(pagetable_t p);
+void            ukvmmap(pagetable_t p, uint64 va, uint64 pa, uint64 sz, int perm);
+pte_t *         walk(pagetable_t pagetable, uint64 va, int alloc);
+void            freewalk(pagetable_t pagetable);
 
 // plic.c
 void            plicinit(void);

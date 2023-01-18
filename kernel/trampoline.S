@@ -75,8 +75,8 @@ uservec:
 
         # restore kernel page table from p->trapframe->kernel_satp
         ld t1, 0(a0)
-        csrw satp, t1
-        sfence.vma zero, zero
+        csrw satp, t1               # only use another page_table, process is the userproc, this mean that the code of kernel is only invoked by change the satp(page_table)
+        sfence.vma zero, zero       # although change satp, the trampoline exist in both process 
 
         # a0 is no longer valid, since the kernel page
         # table does not specially map p->tf.
@@ -86,22 +86,29 @@ uservec:
 
 .globl userret
 userret:
+        # a proc first exec, forkret => userret => a0 is its trapframe
+        #           use it to restore user's reg
+        #           save a0's trapframe to sscratch to use in userret to bakeup user's reg
+
+
         # userret(TRAPFRAME, pagetable)
         # switch from kernel to user.
         # usertrapret() calls here.
         # a0: TRAPFRAME, in user page table.
         # a1: user page table, for satp.
 
-        # switch to the user page table.
-        csrw satp, a1
+        # switch to the user page table.    bacause the kernelpage lack the trapframe, only mapped to user pagetable
+        csrw satp, a1                   # a1 is the second arg, is the user_pagetable
         sfence.vma zero, zero
 
         # put the saved user a0 in sscratch, so we
         # can swap it with our a0 (TRAPFRAME) in the last step.
-        ld t0, 112(a0)
-        csrw sscratch, t0
+        ld t0, 112(a0)       # trapframe 112 is a0, is syscall retval
+        csrw sscratch, t0    # bakeup trapframe->a0 to sscratch
+                             # because here a0 is need to trapframe base, so 
 
-        # restore all but a0 from TRAPFRAME
+        # restore all but a0 from TRAPFRAME     the syscall retval, fork is different
+        #                                       a0 is the first arg, is the trapframe
         ld ra, 40(a0)
         ld sp, 48(a0)
         ld gp, 56(a0)

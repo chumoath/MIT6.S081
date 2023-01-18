@@ -35,6 +35,7 @@ exec(char *path, char **argv)
   if(elf.magic != ELF_MAGIC)
     goto bad;
 
+  // alloc a pagetable as root level
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
@@ -71,7 +72,12 @@ exec(char *path, char **argv)
   if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
   sz = sz1;
+
+
+  // only set the pte of guard page   to  !PTE_U，user mode can't access, it will cause a specific exception to conveniently process
+  //         so the user pagetable will have  5 pte, bacause guard page is valid too 
   uvmclear(pagetable, sz-2*PGSIZE);
+  // sz => all size ( text + data + guard page + stack)
   sp = sz;
   stackbase = sp - PGSIZE;
 
@@ -114,7 +120,11 @@ exec(char *path, char **argv)
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
-  proc_freepagetable(oldpagetable, oldsz);
+  proc_freepagetable(oldpagetable, oldsz);   // if the new pagetable ask success, then free the oldpagetable, to return from exec when exec fail
+  
+  // print the new pagetable, 
+  if(p->pid == 1)
+    vmprint(p->pagetable);
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 

@@ -10,6 +10,7 @@ struct spinlock tickslock;
 uint ticks;
 
 extern char trampoline[], uservec[], userret[];
+extern struct proc proc[NPROC];
 
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
@@ -37,6 +38,8 @@ void
 usertrap(void)
 {
   int which_dev = 0;
+  
+  // vmprint(myproc()->kernel_pagetable);
 
   if((r_sstatus() & SSTATUS_SPP) != 0)
     panic("usertrap: not from user mode");
@@ -49,6 +52,9 @@ usertrap(void)
   
   // save user program counter.
   p->trapframe->epc = r_sepc();
+  // machine exception program counter, holds the
+  // instruction address to which a return from
+  // exception will go.
   
   if(r_scause() == 8){
     // system call
@@ -62,7 +68,7 @@ usertrap(void)
 
     // an interrupt will change sstatus &c registers,
     // so don't enable until done with those registers.
-    intr_on();
+    intr_on();   // interrupt point already store, can be interrupted in it
 
     syscall();
   } else if((which_dev = devintr()) != 0){
@@ -95,14 +101,33 @@ usertrapret(void)
   // kerneltrap() to usertrap(), so turn off interrupts until
   // we're back in user space, where usertrap() is correct.
   intr_off();
+  // interrput return, restore from interrupt point, it will access the public resource, so must intr_off
 
   // send syscalls, interrupts, and exceptions to trampoline.S
-  w_stvec(TRAMPOLINE + (uservec - trampoline));
+  w_stvec(TRAMPOLINE + (uservec - trampoline)); //  
 
   // set up trapframe values that uservec will need when
   // the process next re-enters the kernel.
-  p->trapframe->kernel_satp = r_satp();         // kernel page table
-  p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
+  // p->trapframe->kernel_satp = r_satp();         // kernel page table, every user's have own kernel pagetable
+  
+  /*****************************************************************************************************************/
+
+  p->trapframe->kernel_satp = MAKE_SATP(p->kernel_pagetable); // will be used at uservec in trampoline
+
+  /*****************************************************************************************************************/
+
+
+
+                                                  // this must be satp's format, because it will be loaded to satp directly
+  /*****************************************************************************************************************/
+  // p->trapframe->kernel_sp = p->kstack + PGSIZE; // process's kernel stack
+  
+  // the user's kernel stack's va
+  // p->trapframe->kernel_sp = KSTACK((int) (p - proc)); // error, it is the base of the stack
+  p->trapframe->kernel_sp = p->kstack + PGSIZE;
+
+  /******************************************************************************************************************/
+
   p->trapframe->kernel_trap = (uint64)usertrap;
   p->trapframe->kernel_hartid = r_tp();         // hartid for cpuid()
 
@@ -115,17 +140,21 @@ usertrapret(void)
   x |= SSTATUS_SPIE; // enable interrupts in user mode
   w_sstatus(x);
 
-  // set S Exception Program Counter to the saved user pc.
+  // set S Exception Program Counter to the saved user pc.     return user mode at trapframe->epc, sret will use this reg(epc)
   w_sepc(p->trapframe->epc);
 
   // tell trampoline.S the user page table to switch to.
-  uint64 satp = MAKE_SATP(p->pagetable);
+  uint64 satp = MAKE_SATP(p->pagetable);           // the user pagetable, will be used in userret
 
+  // printf("user_pagetable = %p\n", p->pagetable);
+  // vmprint(p->pagetable);
+
+  // printf("user_kernel_pagetable = %p\n", p->kernel_pagetable);
   // jump to trampoline.S at the top of memory, which 
   // switches to the user page table, restores user registers,
   // and switches to user mode with sret.
   uint64 fn = TRAMPOLINE + (userret - trampoline);
-  ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);
+  ((void (*)(uint64,uint64))fn)(TRAPFRAME, satp);   // call userret
 }
 
 // interrupts and exceptions from kernel code go here via kernelvec,

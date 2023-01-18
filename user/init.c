@@ -31,12 +31,14 @@ main(void)
       printf("init: fork failed\n");
       exit(1);
     }
+    // child
     if(pid == 0){
       exec("sh", argv);
       printf("init: exec sh failed\n");
       exit(1);
     }
 
+    // init
     for(;;){
       // this call to wait() returns if the shell exits,
       // or if a parentless process exits.
@@ -45,6 +47,7 @@ main(void)
         // the shell exited; restart it.
         break;
       } else if(wpid < 0){
+        // init exit
         printf("init: wait returned an error\n");
         exit(1);
       } else {

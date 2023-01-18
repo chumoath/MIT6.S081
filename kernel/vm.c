@@ -11,17 +11,84 @@
  */
 pagetable_t kernel_pagetable;
 
-extern char etext[];  // kernel.ld sets this to end of kernel code.
+extern char etext[];  // kernel.ld sets this to end of kernel code.  PROVIDE can provide a sign
 
 extern char trampoline[]; // trampoline.S
+
+
+void
+ukvmmap(pagetable_t p, uint64 va, uint64 pa, uint64 sz, int perm){
+  if(mappages(p, va, sz, pa, perm) != 0)
+    panic("ukvmmap");
+}
+
+/*
+ * alloc new pagetable for user's kernel_pagetable
+ * only copy the last pte, this is the data's page, not the page_table's page
+*/
+void
+u_cpy_global_kernel_pagetable(pagetable_t * u_kernel_pagetable){
+	*u_kernel_pagetable = (pagetable_t) kalloc(); // kernel have own page_table root
+  	memset(*u_kernel_pagetable, 0, PGSIZE);
+
+	// uart registers
+	ukvmmap(*u_kernel_pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+	// virtio mmio disk interface
+	ukvmmap(*u_kernel_pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+	// CLINT
+	ukvmmap(*u_kernel_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+	// PLIC
+	ukvmmap(*u_kernel_pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+	// map kernel text executable and read-only.
+	ukvmmap(*u_kernel_pagetable, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+
+	// map kernel data and the physical RAM we'll make use of.
+	ukvmmap(*u_kernel_pagetable, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+
+	// map the trampoline for trap entry/exit to
+	// the highest virtual address in the kernel.
+	ukvmmap(*u_kernel_pagetable, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+}
+
+
+// before this, should free the kstack's page, and the rest of kernel's page shouldn't be changed
+void
+u_free_global_kernel_pagetable(pagetable_t p){
+
+    // uart registers
+  	uvmunmap(p, UART0, 1, 0);
+
+  	// virtio mmio disk interface
+  	uvmunmap(p, VIRTIO0, 1, 0);
+
+  	// CLINT
+  	uvmunmap(p, CLINT, 0x10, 0);
+
+  	// PLIC
+  	uvmunmap(p, PLIC, 0x400, 0);
+	
+	uvmunmap(p, KERNBASE, (PHYSTOP - KERNBASE) >> 12, 0);
+
+  	// unmap the trampoline for trap entry/exit to
+  	// the highest virtual address in the kernel.
+  	uvmunmap(p, TRAMPOLINE, 1, 0);
+
+  	// freewalk must assure that every the last pte is invalid
+  	freewalk(p);
+}
 
 /*
  * create a direct-map page table for the kernel.
  */
+
 void
 kvminit()
 {
-  kernel_pagetable = (pagetable_t) kalloc();
+  kernel_pagetable = (pagetable_t) kalloc(); // kernel have own page_table root
   memset(kernel_pagetable, 0, PGSIZE);
 
   // uart registers
@@ -75,16 +142,23 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     panic("walk");
 
   for(int level = 2; level > 0; level--) {
-    pte_t *pte = &pagetable[PX(level, va)];
+    pte_t *pte = &pagetable[PX(level, va)];   // PX          L2 (9)   L1 (9)  L0 (9) PGSHIFT(12)    (va >> (PGSHIFT + level*9)) & 0x0FFF 
     if(*pte & PTE_V) {
-      pagetable = (pagetable_t)PTE2PA(*pte);
+      pagetable = (pagetable_t)PTE2PA(*pte);  // continue to extract next level pte
     } else {
+      // current pte is not vaild
+      //   not allow to alloc, or alloc a page equal to 0, return 0 to mean fail
+
+      //   if alloc success, next loop traverse the pagetable
       if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)
         return 0;
+	  // all entry is valid
       memset(pagetable, 0, PGSIZE);
-      *pte = PA2PTE(pagetable) | PTE_V;
+	  // set the entry to the alloced just and set to valid
+      *pte = PA2PTE(pagetable) | PTE_V;                       // R W X is all 0, is middle pagetable
     }
   }
+  // return the va's last level pte
   return &pagetable[PX(0, va)];
 }
 
@@ -154,6 +228,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
+    // auto alloc the middle of  page_table
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
     if(*pte & PTE_V)
@@ -277,16 +352,18 @@ freewalk(pagetable_t pagetable)
   // there are 2^9 = 512 PTEs in a page table.
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
-    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
+    if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){ // RWX all 0, is a middle pagetable
       // this PTE points to a lower-level page table.
       uint64 child = PTE2PA(pte);
       freewalk((pagetable_t)child);
-      pagetable[i] = 0;
-    } else if(pte & PTE_V){
+      pagetable[i] = 0;                                    // clean this entry
+    } else if(pte & PTE_V){                                // no free leaf, already free
+	                                                       // it should be all 0, shouldn't valid
       panic("freewalk: leaf");
     }
   }
-  kfree((void*)pagetable);
+  // traverse all entry, free this page that pagetable is in 
+  kfree((void*)pagetable);                                 // free pagetable, not page
 }
 
 // Free user memory pages,
@@ -295,7 +372,10 @@ void
 uvmfree(pagetable_t pagetable, uint64 sz)
 {
   if(sz > 0)
-    uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 1);
+	// only free the page
+    uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 1);       // do_free is 1, free the last pte
+  
+  // free the pagetable and the middle pagetable
   freewalk(pagetable);
 }
 
@@ -313,16 +393,23 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uint flags;
   char *mem;
 
+  // user va from 0 start, so can loop from 0
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+
+    // pa of the page
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+    
+    // copy old page to new page
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
+
+    // map the physical page to the identical va in new proc
     if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
       kfree(mem);
       goto err;
@@ -439,4 +526,43 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+static void
+printpg(int level, pte_t * pg_pa){
+	for(uint64 i = 0; i < PGSIZE / sizeof(pte_t); ++i){
+		pte_t data = pg_pa[i];
+		uint64 pa = (data >> 10) << 12;
+
+		// valid
+		if((data & 1UL) != 0){
+			switch (level)
+			{
+			case 1:
+				printf("..");
+				break;
+			case 2:
+				printf(".. ..");
+				break;
+			case 3:
+				printf(".. .. ..");
+				break;
+			}
+
+			printf("%d: pte %p pa %p\n", i, (void *)data, (void*)pa);
+
+			// next level
+			if(level != 3)
+				printpg(level+1, (pte_t*)pa);
+		}
+	}
+}
+
+
+// no need the satp to translate, the kernel can use paddr directly
+// exec is executed on kernel
+void
+vmprint(pagetable_t pagetable){
+	printf("page table %p\n", pagetable);
+	printpg(1, (pte_t*)pagetable);
 }
