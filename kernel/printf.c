@@ -121,6 +121,7 @@ panic(char *s)
   printf("panic: ");
   printf(s);
   printf("\n");
+  backtrace();
   panicked = 1; // freeze uart output from other CPUs
   for(;;)
     ;
@@ -129,6 +130,28 @@ panic(char *s)
 void
 printfinit(void)
 {
-  initlock(&pr.lock, "pr");
-  pr.locking = 1;
+	initlock(&pr.lock, "pr");
+	pr.locking = 1;
+}
+
+// the condition for terminating
+//           per process is allocated one page to as stack
+//           so, only if the fp is page-align, terminate
+// only user stack
+
+void
+backtrace(void)
+{
+	uint64 cur_fp = r_fp();
+	uint64 end_fp = PGROUNDUP(cur_fp);
+
+	do {
+
+		uint64 p = *(uint64 *)(cur_fp - 8);
+		printf("%p\n", p);
+
+		cur_fp = *(uint64 *)(cur_fp - 16);
+
+	} while (cur_fp != end_fp);
+
 }

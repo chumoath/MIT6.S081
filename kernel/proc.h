@@ -94,6 +94,17 @@ struct proc {
   int xstate;                  // Exit status to be returned to parent's wait
   int pid;                     // Process ID
 
+  // for implementing sigalarm, it can be zero
+  uint64 alarm_interval;
+  // the address can be zero
+  uint64 alarm_handler;
+  // interval can be zero, then ddl will be ticks, next timer interrupt, will not invoke handler
+  uint64 alarm_ddl;
+  // store the state when timer interrupt arrive
+  struct trapframe alarm_trapframe;
+  // disable handler is invoked repeatly
+  uint64 alarm_flag;
+
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack
   uint64 sz;                   // Size of process memory (bytes)

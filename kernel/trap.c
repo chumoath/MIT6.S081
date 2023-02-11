@@ -43,6 +43,79 @@ usertrap(void)
 
   // send interrupts and exceptions to kerneltrap(),
   // since we're now in the kernel.
+  
+  // next, if exception or interrupt occur, will enter kernelvec
+  // user space:  need to change satp to kernel's page_table, store user's register,
+  //                      set sp to kstack's sp 
+  //       syscall       =>   ecall
+  //       device intr   =>   
+  //       exception     =>   /0
+
+  // because the satp still point to user's page-table,
+  //         so the uservec must be mapped to user space
+  //         map trapoline to the last page of user virtual space
+
+
+  // kernel space: no need to change satp, no need to set sp to kstack's sp
+  //               only store kernel thread's register
+
+  //       device intr
+  //       exception       => always a error in xv6, panic
+
+
+  // trap step
+  // 1. if trap is a device interrupt and sstatus's SIE is clear, defer
+  // 2. disable interrupt by clearing SIE
+  // 3. copy pc to spec (sret will set spec to pc)
+  // 4. save current mode (user / supervisor) in the SPP bit in sstatus
+  // 5. set scause to reflect the trap's cause
+  // 6. set mode to supervisor
+  // 7. copy stvec to the pc
+
+
+
+  // stvec    =>   one trap occurs, will set it to pc
+  // spec     =>   one trap occurs, will set pc to it
+  //          pair
+
+  // sstatus  =>   SIE  interrupt enable/disable
+  //          =>   SPP  which mode that trap came from, and sret will return
+  // scause   =>   the reason for the trap
+
+
+
+
+  // page-fault  type
+  //  1. load, load data from a vp
+  //  2. store, store date to a vp
+  //  3. instruction, fetch instruction from a vp
+
+  // scause   =>   the type of page fault
+  // stval    =>   the address that couldn't be translated
+
+
+  // combination of  page-table and page-fault
+  // features: COW and lazy allocation and paging from disk (evict some page to disk), automatically extending stacks
+  //           memory-mapped files
+
+  // copy-on-write => only copy one page at stval for parent and child
+  // share         => set read-only in parent and child's page-table's pte =>   heap, stack need to be shared, the data segment may also share
+  
+
+
+  // lazy allocation
+  //       sbrk only alloc page table, and set pte is invalid
+  //       when user use, use page-fault to actually allocate
+
+  // paging from disk -> need more memory than available pysical ram
+  //    evict one page to disk, and mark its pte to invalid  
+  //    kernel can inspect the address, if it is the address whose pages is evict to disk
+  //    evict on page, read this page from disk, mark its pte to valid
+
+  // here
+  //     a trap occurs, SIE is clear, and interrupt is disable
+  //     so, the window of from uservec to intr_on(), will not reponse dev_intr, because the stvec still point to uservec
+  // set stvec to kernelvec, and will intr_on after that
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
@@ -67,6 +140,17 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+    if (which_dev == 2) {
+      // interval and handler can both 0, because user's va can be zero
+      // if interval is 0, the alarm_ddl is impossible >= ticks
+      if (!p->alarm_flag && p->alarm_ddl >= ticks) {
+        p->alarm_flag = 1;
+        p->alarm_trapframe = *p->trapframe;
+        p->alarm_ddl = ticks + p->alarm_interval;
+        // after usertrapret, execute handler
+        p->trapframe->epc = p->alarm_handler;
+      }
+    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -140,9 +224,13 @@ kerneltrap()
   
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");
+  
+  // SIE is the interrupt flag
+  // should disabled interrupt here
   if(intr_get() != 0)
     panic("kerneltrap: interrupts enabled");
 
+  // check and process dev interrupt
   if((which_dev = devintr()) == 0){
     printf("scause %p\n", scause);
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());

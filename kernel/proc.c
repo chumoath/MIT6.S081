@@ -127,6 +127,11 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  // init interval is zero, so sysalarm will set alarm_ddl to ticks, next timer interrupt, ticks will be alarm_ddl + 1
+  // handler will not be invoked
+  p->alarm_interval = 0;
+  p->alarm_handler = 0;
+  p->alarm_flag = 0;
   return p;
 }
 

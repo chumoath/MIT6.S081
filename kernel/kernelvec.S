@@ -7,6 +7,7 @@
 .globl kerneltrap
 .globl kernelvec
 .align 4
+// no need to switch page-table (satp), no need to get the kstack
 kernelvec:
         // make room to save registers.
         addi sp, sp, -256
