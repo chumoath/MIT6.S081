@@ -90,6 +90,8 @@ oom(char *s)
   } else {
     int xstatus;
     wait(&xstatus);
+    // for judge that it is time that the parent is recycling child
+    // printf("here\n");
     exit(xstatus == 0);
   }
 }

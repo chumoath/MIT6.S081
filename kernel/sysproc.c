@@ -41,14 +41,19 @@ sys_wait(void)
 uint64
 sys_sbrk(void)
 {
-  int addr;
+  // n use int, the addr will be truncate, then cast to uint64 will extend by bit
+  uint64 addr;
   int n;
 
   if(argint(0, &n) < 0)
     return -1;
-
+  
+  // if addr is int, will be truncated
   addr = myproc()->sz;
+
+  // n will extend by bit, so +- no care
   myproc()->sz += n;
+
   //printf("new sz is %p\n", myproc()->sz);
   // need to unmap and free some 
   if (n < 0) {
@@ -81,10 +86,9 @@ sys_sbrk(void)
   uint64 oldsz = addr;
 
   if (newsz > TRAPFRAME) {
-
     myproc()->sz = oldsz;
     // exceed the max va, return -1 that indicate that failed
-    return (uint64)-1;
+    return -1;
   }
 
   newsz = PGROUNDUP(newsz);

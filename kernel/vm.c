@@ -71,8 +71,10 @@ kvminithart()
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
+
   if(va >= MAXVA) {
-    printf("va is %p\n, exceed the max va\n", va);
+    printf("va is %p\n", va);
+    printf("max user heap address is %p\n", TRAPFRAME);
     panic("walk");
   }
 
