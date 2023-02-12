@@ -46,15 +46,46 @@ sys_sbrk(void)
 
   if(argint(0, &n) < 0)
     return -1;
+
   addr = myproc()->sz;
+  myproc()->sz += n;
+  //printf("new sz is %p\n", myproc()->sz);
+  // need to unmap and free some 
+  if (n < 0) {
+    // will extend by bit
+
+    // unmap some empty page
+    uint64 start = myproc()->sz;
+    uint64 end = addr;
+
+    start = PGROUNDUP(start);
+    end = PGROUNDUP(end);
+    //printf("start: %p\n", start); 
+    //printf("end  : %p\n", end); 
+    uvmunmap(myproc()->pagetable, start, (end - start) / PGSIZE, 1);
+
+    return addr;
+  }
+
+  if (n == 0)
+    return addr;
+
+  // remain,  n > 0
+
   //if(growproc(n) < 0)
   //  return -1;
 
   // must alloc all middle page_table, otherwise when freeproc->uvmunmap->walk will not find the pte, will panic
   //walk();
-  myproc()->sz += n;
   uint64 newsz = myproc()->sz;
   uint64 oldsz = addr;
+
+  if (newsz > TRAPFRAME) {
+
+    myproc()->sz = oldsz;
+    // exceed the max va, return -1 that indicate that failed
+    return (uint64)-1;
+  }
 
   newsz = PGROUNDUP(newsz);
   oldsz = PGROUNDUP(oldsz);

@@ -75,8 +75,10 @@ usertrap(void)
     uint64 va = r_stval();
 
     // exceed the alloced size
-    if (va >= myproc()->sz) 
+    if (va >= myproc()->sz)  {
+      printf("the va exceed the max sz allocated by sbrk\n");
       goto bad;
+    }
 
     va = PGROUNDDOWN(va);
 
@@ -87,6 +89,7 @@ usertrap(void)
       printf("page-fault alloc pa failed\n");
       goto bad;
     }
+
     memset(mem, 0, PGSIZE);
 
     // map
@@ -98,7 +101,9 @@ usertrap(void)
 
   }
   else {
+
   bad:
+    printf("will kill this process\n");
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

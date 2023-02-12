@@ -58,6 +58,7 @@ sparse_memory_unmap(char *s)
       exit(1);
     } else if (pid == 0) {
       sbrk(-1L * REGION_SZ);
+      // should have exception, page_fault =>  killed = 1 => exit(-1);
       *(char **)i = i;
       exit(0);
     } else {
