@@ -190,7 +190,9 @@ proc_pagetable(struct proc *p)
 void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
+  // unmap this process's trampoline, no need to free
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+  // unmap this process's 
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
 }

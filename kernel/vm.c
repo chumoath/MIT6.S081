@@ -180,12 +180,23 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    
+    // the middle pte must exist
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
-    if(PTE_FLAGS(*pte) == PTE_V)
+
+    if((*pte & PTE_V) == 0) {
+      // panic("uvmunmap: not mapped");
+      // error: no map, no need to kfree
+      //  return; // directly return
+      // should next iterate
+      *pte = 0;
+      continue;
+    }
+
+    if(PTE_FLAGS(*pte) == PTE_V) // leaf: have eventual physical address, not middle page_table physical address
       panic("uvmunmap: not a leaf");
+    
     if(do_free){
       uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
@@ -277,15 +288,25 @@ freewalk(pagetable_t pagetable)
   // there are 2^9 = 512 PTEs in a page table.
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
+
+    // middle page-table, PTE_V is 1, PTE_R PTE_W PTE_X are both zero
+    // this pte is middle page-table
     if((pte & PTE_V) && (pte & (PTE_R|PTE_W|PTE_X)) == 0){
       // this PTE points to a lower-level page table.
-      uint64 child = PTE2PA(pte);
+      uint64 child = PTE2PA(pte); // => get next middle-pagetable's physical address
       freewalk((pagetable_t)child);
-      pagetable[i] = 0;
+      pagetable[i] = 0;           // clear this entry
     } else if(pte & PTE_V){
+      // get here, indicate that this pte is leaf
+
+      // all leaf entry should be both clear
       panic("freewalk: leaf");
     }
+
+    // no middle-page-table, and no leaf, no need to process
   }
+
+  // free cur page-table, this is one page
   kfree((void*)pagetable);
 }
 

@@ -50,6 +50,7 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
+  // syscall
   if(r_scause() == 8){
     // system call
 
@@ -66,8 +67,38 @@ usertrap(void)
 
     syscall();
   } else if((which_dev = devintr()) != 0){
+    // device interrupt
     // ok
-  } else {
+  } else if (r_scause() == 0xd || r_scause() == 0xf) {
+
+    // execption
+    uint64 va = r_stval();
+
+    // exceed the alloced size
+    if (va >= myproc()->sz) 
+      goto bad;
+
+    va = PGROUNDDOWN(va);
+
+    // alloc physical address
+    char * mem = kalloc();
+    
+    if (mem == 0) {
+      printf("page-fault alloc pa failed\n");
+      goto bad;
+    }
+    memset(mem, 0, PGSIZE);
+
+    // map
+    if (mappages(myproc()->pagetable, va, PGSIZE, (uint64)mem, PTE_R | PTE_W | PTE_U | PTE_X) != 0) {
+      printf("mappages failed\n");
+      kfree(mem);
+      goto bad;
+    }
+
+  }
+  else {
+  bad:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

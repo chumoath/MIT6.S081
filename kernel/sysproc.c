@@ -47,8 +47,23 @@ sys_sbrk(void)
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+  //if(growproc(n) < 0)
+  //  return -1;
+
+  // must alloc all middle page_table, otherwise when freeproc->uvmunmap->walk will not find the pte, will panic
+  //walk();
+  myproc()->sz += n;
+  uint64 newsz = myproc()->sz;
+  uint64 oldsz = addr;
+
+  newsz = PGROUNDUP(newsz);
+  oldsz = PGROUNDUP(oldsz);
+
+  for (; oldsz != newsz; oldsz += PGSIZE) {
+    // 1: indicate that will alloc middle page-table
+    walk(myproc()->pagetable, oldsz, 1);
+  }
+
   return addr;
 }
 
