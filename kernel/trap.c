@@ -67,7 +67,34 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if (r_scause() == 0xd || r_scause() == 0xf) {
+    uint64 va = r_stval();
+    
+    pte_t * pte = walk(p->pagetable, va, 0);
+
+    if (pte == 0) goto bad;
+
+    // shared physical address, don't consider lazy allocation
+    if ((*pte & PTE_COW) == 0 || (*pte & PTE_V) == 0) goto bad;
+    
+    char * mem = kalloc();
+    if (mem == 0) goto bad;
+
+    uint64 pa = PTE2PA(*pte);
+    uint flags = PTE_FLAGS(*pte);
+    // set PTE_W
+    flags |= PTE_W;
+    // clear PTE_COW
+    flags &= ~PTE_COW;
+
+    memmove(mem, (void*)pa, PGSIZE);
+
+    *pte = PA2PTE((uint64)mem) | flags;
+    
+    kfree((void *)pa);
+
   } else {
+bad:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

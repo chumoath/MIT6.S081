@@ -2598,6 +2598,7 @@ countfree()
     
     while(1){
       uint64 a = (uint64) sbrk(4096);
+      // if increase memory fail, will return -1
       if(a == 0xffffffffffffffff){
         break;
       }
@@ -2695,7 +2696,7 @@ main(int argc, char *argv[])
     {reparent2, "reparent2"},
     {pgbug, "pgbug" },
     {sbrkbugs, "sbrkbugs" },
-    // {badwrite, "badwrite" },
+    {badwrite, "badwrite" },
     {badarg, "badarg" },
     {reparent, "reparent" },
     {twochildren, "twochildren"},
@@ -2783,6 +2784,8 @@ main(int argc, char *argv[])
     printf("SOME TESTS FAILED\n");
     exit(1);
   } else if((free1 = countfree()) < free0){
+    printf("free1 = %d\n", free1);
+    printf("free0 = %d\n", free0);
     printf("FAILED -- lost some free pages %d (out of %d)\n", free1, free0);
     exit(1);
   } else {

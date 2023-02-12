@@ -15,6 +15,8 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+extern uint8 ref_cnt[];
+
 /*
  * create a direct-map page table for the kernel.
  */
@@ -311,27 +313,30 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
+    // set to unwritable
+    *pte &= ~PTE_W;
+    *pte |= PTE_COW;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    // if((mem = kalloc()) == 0)
+    //  goto err;
+    //memmove(mem, (char*)pa, PGSIZE);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+
+    ref_cnt[pa / PGSIZE]++;
   }
   return 0;
 
  err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
+  uvmunmap(new, 0, i / PGSIZE, 0);
   return -1;
 }
 
@@ -352,19 +357,58 @@ uvmclear(pagetable_t pagetable, uint64 va)
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
 int
-copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
+copyout(pagetable_t pagetable, uint64 dstva, char *src, int len)
 {
-  uint64 n, va0, pa0;
-
+  uint64 n, va0;
+  pte_t * pte;
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+
+    // have a test that va is 0xffffffffffffffff
+    if (va0 > MAXVA) return -1;
+
+    pte = walk(pagetable, va0, 0);
+    if(pte == 0)
       return -1;
+
+    if ((*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 || (*pte & PTE_R) == 0) {
+      return -1;
+    }
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
-    memmove((void *)(pa0 + (dstva - va0)), src, n);
+    
+    // original pa and flag
+    uint64 pa = PTE2PA(*pte);
+    uint flags = PTE_FLAGS(*pte);
+    
+    // shared page
+    if (*pte & PTE_COW) {
+
+      // alloc new physical data
+      char * mem = kalloc();
+      if (mem == 0) return -1;
+
+      // drop cow flag
+      flags &= ~PTE_COW;
+
+      // set writable
+      flags |= PTE_W;
+      // copy page
+      memmove(mem, (char*)pa, PGSIZE); 
+
+      *pte = PA2PTE((uint64)mem) | flags;
+
+      // drop shared page
+      kfree((void*)pa);
+
+      // ready for writing new data
+      pa = (uint64)mem;     
+    }
+
+    // writing new data
+    memmove((void *)(pa + (dstva - va0)), src, n);
 
     len -= n;
     src += n;
