@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "\"*.cpp\"": "\"c++\"",
+        "spinlock.h": "c",
+        "types.h": "c",
+        "user.h": "c",
+        "defs.h": "c",
+        "sleeplock.h": "c",
+        "riscv.h": "c",
+        "date.h": "c"
+    }
+}

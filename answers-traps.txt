@@ -1,0 +1,114 @@
+ABI      Meaning                   preserve
+zero     Zero                         
+ra       Return Address             caller
+sp       Stack pointer              Callee
+gp       Global pointer             
+tp       Thread pointer
+t0-t6    Temporary registers        caller
+s0-s11   Callee-saved registers     callee    s0/fp
+a0-a7    Argument registers         caller
+
+a0 usually is a return val for one call, and as the first parameters
+s0 store cur function's frame pointer
+s0 is equal to ebp, but return address is not pushed to stack;
+
+
+risc-v
+    addi sp, sp, -16;
+    sd ra, sp(8); 
+    sd s0, sp(0);
+
+    addi s0, sp, 16;
+
+
+=> current frame pointer
+    return Address (ra)   =>   caller store, incate that callee will call other function
+    previous fp    (s0)   =>   callee store
+
+    saved registers
+    local variable      (from up to down)
+
+
+x86
+    push %ebp
+    movl %esp, %ebp
+
+    paramn
+    ...
+    param1
+    return Address
+    last ebp                 => (frame pointer, callee store)
+                             =>   frame pointer
+    saved registers
+    local varibale       (from up to down)
+
+caller preserve, callee can use directly
+               , caller must bakeup this val before call
+
+callee preserve, callee must hold this val after finishing
+
+
+syscall
+
+a0 =>  return val, and parameters
+a1-a6  parameters
+a7 =>  syscall_num
+
+
+
+
+instruction
+
+Store
+    sb rs1, rs2, imm    store byte
+    sh                  half word
+    sw                  word
+
+Load
+    lb rd, rs1, imm
+    lh
+    lbu                  unsigned
+    lhu
+    lw
+
+sd	s0,8(sp)
+ld	s0,8(sp)
+
+
+# a0 = pc + sext(imm(20 bit) << 12);
+
+auipc	a0,0x0
+
+
+
+
+# 1536 is base 10, 630 is base 16,  1536 = 0x600, ra = 0x30;
+# rd = pc + 4, pc = ra + sext(imm(12 bit)) & ~1
+jalr	1536(ra) # 630 <printf>
+ 
+
+1. a0 - a7  arguments    a2
+2. no invoke, compile-time compute directly
+3. 0x630
+4. 0x38
+
+5. 0x64  d    0x6c   l    0x72  r
+    little-endian   so, should be 0x72 0x6c 0x64 0x00
+    output: HE110 World
+    big-endian: set i to 0x726c6400, no need to change 57616
+
+6. because the callee know the parameters's order, so take enough that need
+    printf("x=%d y=%d", 3);
+    the callee use a0, a1, a2 as parameters, but a2 is uncertain
+
+
+
+
+# 
+
+0x0000000080002cb8
+0x0000000080002b92
+0x000000008000287c
+/home/wjxh/labs/6.S081/xv6-labs-2020/kernel/sysproc.c:63
+/home/wjxh/labs/6.S081/xv6-labs-2020/kernel/syscall.c:140
+/home/wjxh/labs/6.S081/xv6-labs-2020/kernel/trap.c:76           =>   kernel.asm => user_trap => 76 (after syscall's next)
