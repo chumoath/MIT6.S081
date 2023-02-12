@@ -94,3 +94,16 @@ kalloc(void)
 
   return (void*)r;
 }
+
+
+uint64
+sys_kmmdump(void) {
+  printf("-------------------------------\n");
+  for (int i = 0; i < PHYSTOP / PGSIZE; ++i) {
+    if (ref_cnt[i] == 2) {
+      printf("error address is %p\n", (i * PGSIZE));
+    }
+  }
+  printf("-------------------------------\n");
+  return 0;
+}

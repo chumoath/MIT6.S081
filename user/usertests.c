@@ -2770,7 +2770,9 @@ main(int argc, char *argv[])
   }
 
   printf("usertests starting\n");
+  kmmdump();
   int free0 = countfree();
+  kmmdump();
   int free1 = 0;
   int fail = 0;
   for (struct test *t = tests; t->s != 0; t++) {
@@ -2780,10 +2782,12 @@ main(int argc, char *argv[])
     }
   }
 
+  kmmdump();
   if(fail){
     printf("SOME TESTS FAILED\n");
     exit(1);
   } else if((free1 = countfree()) < free0){
+    kmmdump();
     printf("free1 = %d\n", free1);
     printf("free0 = %d\n", free0);
     printf("FAILED -- lost some free pages %d (out of %d)\n", free1, free0);
