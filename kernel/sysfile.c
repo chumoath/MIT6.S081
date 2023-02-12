@@ -65,6 +65,36 @@ sys_dup(void)
   filedup(f);
   return fd;
 }
+int
+page_fault_map(uint64 start, uint64 size) {
+
+  uint64 end = start + size;
+  // already allocate, but may be not mapped
+  if (end > myproc()->sz) {
+    return -1;
+  }
+
+  start = PGROUNDDOWN(start);
+  end = PGROUNDUP(end);
+ 
+ for (; start < end; start += PGSIZE) {
+
+    pte_t * pte = walk(myproc()->pagetable, start, 1);
+    
+    if (*pte & PTE_V) continue;
+
+    printf("here\n");
+    char * mem = kalloc();
+
+    if (mem == 0) panic("kalloc fail");
+
+    if (mappages(myproc()->pagetable, start, PGSIZE, (uint64)mem, PTE_U | PTE_X | PTE_W | PTE_R) != 0) {
+      panic("mappages fail");
+    }
+  }
+
+  return 0;
+}
 
 uint64
 sys_read(void)
@@ -75,6 +105,10 @@ sys_read(void)
 
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
+
+  if (page_fault_map(p, n) == -1)
+    return -1;
+
   return fileread(f, p, n);
 }
 
@@ -88,8 +122,13 @@ sys_write(void)
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
 
+  if (page_fault_map(p, n) == -1)
+    return -1;
+
   return filewrite(f, p, n);
 }
+
+
 
 uint64
 sys_close(void)
@@ -466,6 +505,9 @@ sys_pipe(void)
     return -1;
   if(pipealloc(&rf, &wf) < 0)
     return -1;
+
+  if (page_fault_map(fdarray, sizeof(uint64) * 2) == -1) return -1;
+
   fd0 = -1;
   if((fd0 = fdalloc(rf)) < 0 || (fd1 = fdalloc(wf)) < 0){
     if(fd0 >= 0)

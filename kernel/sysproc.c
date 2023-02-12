@@ -67,6 +67,7 @@ sys_sbrk(void)
     end = PGROUNDUP(end);
     //printf("start: %p\n", start); 
     //printf("end  : %p\n", end); 
+
     uvmunmap(myproc()->pagetable, start, (end - start) / PGSIZE, 1);
 
     return addr;
@@ -91,13 +92,6 @@ sys_sbrk(void)
     return -1;
   }
 
-  newsz = PGROUNDUP(newsz);
-  oldsz = PGROUNDUP(oldsz);
-
-  for (; oldsz != newsz; oldsz += PGSIZE) {
-    // 1: indicate that will alloc middle page-table
-    walk(myproc()->pagetable, oldsz, 1);
-  }
 
   return addr;
 }

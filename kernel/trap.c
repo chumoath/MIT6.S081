@@ -74,6 +74,16 @@ usertrap(void)
     // execption
     uint64 va = r_stval();
 
+    // stack
+    pte_t * pte;
+    if ((pte = walk(p->pagetable, va, 0))) {
+      // valid
+      // stack   PTE_U
+      if ((*pte & PTE_V) != 0) {
+        goto bad;
+      }
+    }
+
     // exceed the alloced size
     if (va >= myproc()->sz)  {
       printf("the va exceed the max sz allocated by sbrk\n");
@@ -94,14 +104,12 @@ usertrap(void)
 
     // map
     if (mappages(myproc()->pagetable, va, PGSIZE, (uint64)mem, PTE_R | PTE_W | PTE_U | PTE_X) != 0) {
-      printf("mappages failed\n");
       kfree(mem);
       goto bad;
     }
 
   }
   else {
-
   bad:
     printf("will kill this process\n");
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
@@ -185,6 +193,40 @@ kerneltrap()
     panic("kerneltrap");
   }
 
+
+  if (scause == 0xd || scause == 0xf) {
+    // execption
+    uint64 va = r_stval();
+
+    // exceed the alloced size
+    if (va >= myproc()->sz)  {
+      printf("the va exceed the max sz allocated by sbrk\n");
+      goto fail;
+    }
+
+    va = PGROUNDDOWN(va);
+
+    // alloc physical address
+    char * mem = kalloc();
+    
+    if (mem == 0) {
+      printf("page-fault alloc pa failed\n");
+      goto fail;
+    }
+
+    memset(mem, 0, PGSIZE);
+
+    // map
+    if (mappages(myproc()->pagetable, va, PGSIZE, (uint64)mem, PTE_R | PTE_W | PTE_U | PTE_X) != 0) {
+      printf("mappages failed\n");
+      kfree(mem);
+      goto fail;
+    }
+    goto normal;
+  fail:
+    exit(-1);
+  }
+normal:
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
     yield();

@@ -136,6 +136,7 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  //vmprint(p->pagetable);
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;

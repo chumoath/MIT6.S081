@@ -184,11 +184,15 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     panic("uvmunmap: not aligned");
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
-    
     // the middle pte must exist
-    if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+    // all last pte will be 0, and are valid
+    if((pte = walk(pagetable, a, 0)) == 0) {
+      // panic("uvmunmap: walk");
+      // va's last pte is no exits, namely middle page table is no exits, continue
+      continue;
+    }
 
+    // no valid
     if((*pte & PTE_V) == 0) {
       // panic("uvmunmap: not mapped");
       // error: no map, no need to kfree
@@ -338,15 +342,12 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   uint flags;
   char *mem;
 
+  // only copy the last pte exists
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      continue;
 
     if((*pte & PTE_V) == 0) {
-      // panic("uvmcopy: page not present");
-      // the page only is allocated, but is not mapped
-      // alloc the middle page-table for this va for new process
-      walk(new, i, 1);
       continue;
     }
     pa = PTE2PA(*pte);
@@ -471,4 +472,43 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+static void
+printpg(int level, pte_t * pg_pa){
+	for(uint64 i = 0; i < PGSIZE / sizeof(pte_t); ++i){
+		pte_t data = pg_pa[i];
+		uint64 pa = (data >> 10) << 12;
+
+		// valid
+		if((data & 1UL) != 0){
+			switch (level)
+			{
+			case 1:
+				printf("..");
+				break;
+			case 2:
+				printf(".. ..");
+				break;
+			case 3:
+				printf(".. .. ..");
+				break;
+			}
+
+			printf("%d: pte %p pa %p\n", i, (void *)data, (void*)pa);
+
+			// next level
+			if(level != 3)
+				printpg(level+1, (pte_t*)pa);
+		}
+	}
+}
+
+
+// no need the satp to translate, the kernel can use paddr directly
+// exec is executed on kernel
+void
+vmprint(pagetable_t pagetable){
+	printf("page table %p\n", pagetable);
+	printpg(1, (pte_t*)pagetable);
 }
