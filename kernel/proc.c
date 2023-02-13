@@ -553,7 +553,7 @@ forkret(void)
 // Atomically release lock and sleep on chan.
 // Reacquires lock when awakened.
 void
-sleep(void *chan, struct spinlock *lk)
+sleep(void *chan, struct spinlock *lk) // lk is the condition variable's lock
 {
   struct proc *p = myproc();
   

@@ -30,7 +30,30 @@ barrier()
   // Block until all threads have called barrier() and
   // then increment bstate.round.
   //
+  pthread_mutex_lock(&bstate.barrier_mutex);
+  // must lock here, because this is shared resource
+  ++bstate.nthread;
+
+  // all is mutex, can not be while, because per thread only judge once
+  //      all thread no need to judge many times, because all thread are wakeup is reasonable
+  //      don't rigid, use reasonable
+
+  if (bstate.nthread != nthread)
+  // to avoid lost wakeup
+  //       sleep -> get proc->lock, then unlock this mutex_lock, sleep
   
+  //       wakeup ->  get mutex_lock
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  else {
+    // the last thread, do all reset thing
+    bstate.nthread = 0;
+    bstate.round++;
+    // all thread continue run
+    pthread_cond_broadcast(&bstate.barrier_cond);
+  }
+
+  // per thread will eval
+  pthread_mutex_unlock(&bstate.barrier_mutex);
 }
 
 static void *

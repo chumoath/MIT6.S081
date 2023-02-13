@@ -14,6 +14,8 @@ struct entry {
   struct entry *next;
 };
 struct entry *table[NBUCKET];
+// per bucket one lock, mainly lock one bucket's head, avoiding two thread only update once 
+pthread_mutex_t locks[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
 
@@ -42,6 +44,7 @@ void put(int key, int value)
 
   // is the key already present?
   struct entry *e = 0;
+  // no need to care, because per thread's key is different
   for (e = table[i]; e != 0; e = e->next) {
     if (e->key == key)
       break;
@@ -51,7 +54,14 @@ void put(int key, int value)
     e->value = value;
   } else {
     // the new is new.
+    // table[i] is shared
+    pthread_mutex_lock(&locks[i]);
+    // one change the bucket, another enter
+    //       if two thread enter at the same, they will get same table[i], only one can be the bucket's head
     insert(key, value, &table[i], table[i]);
+    pthread_mutex_unlock(&locks[i]);
+
+    // bacause start get after put completely, so no need to modify get
   }
 }
 
@@ -115,6 +125,9 @@ main(int argc, char *argv[])
     keys[i] = random();
   }
 
+  for (int i = 0; i < NBUCKET; ++i) {
+    pthread_mutex_init(&locks[i], NULL);
+  }
   //
   // first the puts
   //
@@ -144,4 +157,7 @@ main(int argc, char *argv[])
 
   printf("%d gets, %.3f seconds, %.0f gets/second\n",
          NKEYS*nthread, t1 - t0, (NKEYS*nthread) / (t1 - t0));
+
+  for (int i = 0; i < NBUCKET; i++) 
+    pthread_mutex_destroy(&locks[i]);
 }
