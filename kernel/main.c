@@ -10,6 +10,7 @@ volatile static int started = 0;
 void
 main()
 {
+  // only cpu 0 will init all
   if(cpuid() == 0){
     consoleinit();
 #if defined(LAB_PGTBL) || defined(LAB_LOCK)
@@ -39,14 +40,19 @@ main()
     __sync_synchronize();
     started = 1;
   } else {
+    // wait
     while(started == 0)
       ;
     __sync_synchronize();
     printf("hart %d starting\n", cpuid());
+    
+    // init all resources that itself
+
     kvminithart();    // turn on paging
     trapinithart();   // install kernel trap vector
     plicinithart();   // ask PLIC for device interrupts
   }
 
+  // every cpu have it
   scheduler();        
 }

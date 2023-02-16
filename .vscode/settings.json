@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "\"*.cpp\"": "\"c++\"",
+        "buf.h": "c",
+        "param.h": "c"
+    }
+}
