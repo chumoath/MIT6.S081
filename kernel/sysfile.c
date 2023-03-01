@@ -308,13 +308,57 @@ sys_open(void)
       end_op();
       return -1;
     }
+
     ilock(ip);
+    
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
       return -1;
     }
   }
+
+  // ip->type == T_SYMLINK and NOFOLLOW, use symlink itself
+  if ((ip->type == T_SYMLINK) && ((omode & O_NOFOLLOW) == 0)) {
+    int depth = 0;
+    const int threshold = 10;
+
+    while (ip->type == T_SYMLINK) {
+        
+        if (depth > threshold) {
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+
+        char path[MAXPATH];
+        
+        // read new path
+        int count = readi(ip, 0, (uint64)path, 0, MAXPATH);
+
+        if (count == -1 || count == 0) {
+          iunlockput(ip);
+          end_op();
+          return -1;
+        }
+
+        // set new path to c string
+        path[count] = '\0';
+
+        // dereference last ip
+        iunlockput(ip);
+
+        // get new ip
+        if ((ip = namei(path)) == 0) {
+          end_op();
+          return -1;
+        }
+
+        ilock(ip);
+        ++depth;
+      }
+  }
+  
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
@@ -482,5 +526,27 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64
+sys_symlink(void) {
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+
+  begin_op();
+  if (argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0 || 
+    (ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+    end_op();
+    return -1;
+  } 
+  
+  ip->type = T_SYMLINK;
+  writei(ip, 0, (uint64)target, 0, strlen(target));
+
+  // dereference inode's reference
+  iunlockput(ip);
+  end_op();
+
   return 0;
 }
