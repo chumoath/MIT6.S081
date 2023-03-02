@@ -48,6 +48,7 @@ procinit(void)
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
       p->kstack = KSTACK((int) (p - proc));
+      p->vma_addr = TRAPFRAME;
   }
 }
 
@@ -260,6 +261,48 @@ growproc(int n)
   return 0;
 }
 
+
+extern pte_t *
+walk(pagetable_t pagetable, uint64 va, int alloc);
+
+int
+vma_copy(pagetable_t old, pagetable_t new, struct vma * v) {
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+  char *mem;
+
+
+  for (int j = 0; j < 16; j++) {
+
+    if (v[j].used == 1) {
+      filedup(v[j].file);
+
+      i = v[j].addr;
+      uint64 end = v[j].addr + v[j].length;
+
+      for (; i < end; i += PGSIZE) {
+        if ((pte = walk(old, i, 0)) == 0)
+          continue;
+          // panic("vmacopy: pte should exist");
+
+        if ((*pte & PTE_V) == 0)
+          // panic("vmacopy: page not present");
+          continue; // load-lazy
+        
+        pa = PTE2PA(*pte);
+        flags = PTE_FLAGS(*pte);
+        mem = kalloc();
+        memmove(mem, (char*)pa, PGSIZE);
+        mappages(new, i, PGSIZE, (uint64)mem, flags);
+      }
+    }
+  }
+
+  return 0;
+}
+
+
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
 int
@@ -280,6 +323,16 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+
+  vma_copy(p->pagetable, np->pagetable, p->vma_talbe);
+
+  np->vma_addr = p->vma_addr;
+
+  // copy vma_table
+  for (int i = 0; i < 16; i++) {
+    np->vma_talbe[i] = p->vma_talbe[i];
+  }
+
   np->sz = p->sz;
 
   np->parent = p;
@@ -333,6 +386,25 @@ reparent(struct proc *p)
   }
 }
 
+
+int
+unmap_vma(void) {
+  struct proc * p = myproc();
+  struct vma * v = p->vma_talbe;
+  for (int i = 0; i < 16; i++) {
+    if (v[i].used == 1) {
+      uint64 start = v[i].addr;
+      uint64 end = PGROUNDUP(start + v[i].length);
+
+      uvmunmap(p->pagetable, start, (end - start)/PGSIZE, 1);
+      v[i].used = 0;
+      fileclose(v->file);
+    }
+  }
+
+  return 0;
+}
+
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
@@ -343,6 +415,10 @@ exit(int status)
 
   if(p == initproc)
     panic("init exiting");
+
+
+  // unmap all vma
+  unmap_vma();
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){

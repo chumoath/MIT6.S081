@@ -484,3 +484,117 @@ sys_pipe(void)
   }
   return 0;
 }
+
+
+
+uint64
+alloc_vma_address(uint64 size) {
+  size = PGROUNDUP(size);
+  myproc()->vma_addr -= size;
+
+  uint64 start = myproc()->vma_addr;
+  
+  return start;
+}
+
+uint64
+sys_mmap(void) {
+  uint64 addr;
+  int length, prot, flags, fd, offset;
+
+  // addr    -> always zero
+  // length
+  // prot    -> readable writable or both
+  // flags   -> map_shared, map_private
+  // offset  -> always zero 
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0 || argint(2, &prot) < 0 ||
+      argint(3, &flags) < 0 || argint(4, &fd) < 0 || argint(5, &offset) < 0)
+      return -1;
+
+  // allocate vma
+  struct proc * p = myproc();
+
+  // check permissions
+  if (((flags & MAP_SHARED) != 0) && ((prot & PROT_WRITE) != 0) && (p->ofile[fd]->writable == 0))
+    return -1;
+
+  int i;
+  for (i = 0; i < 16; i++) {
+    if (p->vma_talbe[i].used == 0)
+      break;
+  }
+
+  if (i == 16) panic("sys_mmap");
+
+
+  struct vma * v = &p->vma_talbe[i];
+  v->used = 1;
+
+
+  // increase reference to struct file
+  filedup(p->ofile[fd]);
+
+  // set attribute
+  v->addr = alloc_vma_address(length);
+
+  v->file = p->ofile[fd];
+  v->length = length;
+  v->permission = prot;
+  v->flag = flags;
+
+  return v->addr;
+}
+
+uint64
+sys_munmap(void) {
+  uint64 addr, start, end;
+  int length;
+
+  if (argaddr(0, &addr) < 0 || argint(1, &length) < 0)
+    return -1;
+  
+  start = addr;
+  // start = PGROUNDUP(start);
+  
+  end = addr + length;
+  // end = PGROUNDUP(end);
+
+  struct vma * v;
+  struct proc * p = myproc();
+  struct vma * vma_table = p->vma_talbe;
+
+  if (addr < p->sz) panic("sys_munmap");
+
+  for (int i = 0; i < 16; i++) {
+    v = &vma_table[i];
+    if (addr >= v->addr && addr + length <= v->addr + v->length)
+      break;
+  }
+
+  if (addr > v->addr && addr + length < v->addr + v->length)
+    panic("sys_munmap");
+  
+  if ((v->flag & MAP_SHARED) != 0)
+    filewrite(v->file, addr, length);
+
+
+  if (addr == v->addr) {
+    start = addr;
+    end = PGROUNDDOWN(end);
+    v->addr = end;
+    v->length -= (end - start);
+  } else {
+    start = PGROUNDUP(start);
+    end = PGROUNDUP(end);
+    v->length -= start;
+  }
+
+  uvmunmap(p->pagetable, start, (end - start)/PGSIZE, 1);
+
+  if (v->length == 0) {
+    v->used = 0;
+    fileclose(v->file);
+  }
+
+  return 0;
+}

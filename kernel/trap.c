@@ -3,8 +3,12 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "spinlock.h"
+#include "sleeplock.h"
 #include "proc.h"
 #include "defs.h"
+#include "fs.h"
+#include "fcntl.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -28,6 +32,68 @@ trapinithart(void)
 {
   w_stvec((uint64)kernelvec);
 }
+
+
+extern pte_t *
+walk(pagetable_t pagetable, uint64 va, int alloc);
+
+
+int
+vma_pagefault_handler(uint64 addr) {
+
+  addr = PGROUNDDOWN(addr);
+  struct vma * vma_table = myproc()->vma_talbe;
+
+  struct vma * v;
+  int i;
+  for (i = 0; i < 16; i++) {
+    v = &vma_table[i];
+    if (v->used) {
+      if (addr >= v->addr && addr < v->addr + v->length)
+        break;
+    }
+  }
+
+  if (i == 16) //panic("vma_pagefault_handler");
+    return -1;
+  
+  int permission = v->permission;
+  // int flags = v->flag;
+  // int length = v->length;
+  struct file * f = v->file;
+
+  int offset = addr - v->addr;
+
+  // alloc one page
+  void * mem = kalloc();
+  if (mem == 0) panic("kalloc");
+
+  memset(mem, 0, PGSIZE);
+
+  // map
+  pte_t * pte = walk(myproc()->pagetable, addr, 1);
+
+  *pte = PA2PTE((uint64)mem) | PTE_V | PTE_U;
+
+  if ((permission & PROT_READ) != 0)
+    *pte |= PTE_R;
+  
+  if ((permission & PROT_WRITE) != 0)
+    *pte |= PTE_W;
+
+
+
+  // read
+  struct inode * ip = f->ip;
+  ilock(ip);
+
+  readi(ip, 1, addr, offset, PGSIZE);
+
+  iunlock(ip);
+
+  return 0;
+}
+
 
 //
 // handle an interrupt, exception, or system call from user space.
@@ -67,7 +133,30 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 0xd || r_scause() == 0xf) {
+    uint64 addr = r_stval();
+    // printf("addr is %p\n", addr);
+
+    // stack overflow
+    pte_t * pte = walk(p->pagetable, addr, 0);
+    if (pte != 0 && ((PTE_FLAGS(*pte) & PTE_V) != 0)) 
+      goto killed;
+
+    // no stack and less than sz
+    if (addr < p->sz)
+      panic("mmap");
+
+    // may be vma
+    if (addr < TRAPFRAME) {
+      // may be no find in vma_table, goto killed
+      if (vma_pagefault_handler(addr) == -1) goto killed;
+    
+    } else {
+    // access kernel address
+      goto killed;
+    }
   } else {
+killed:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
