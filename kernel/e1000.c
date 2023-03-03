@@ -19,7 +19,8 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 // remember where the e1000's registers live.
 static volatile uint32 *regs;
 
-struct spinlock e1000_lock;
+struct spinlock e1000_lock_rx;
+struct spinlock e1000_lock_tx;
 
 // called by pci_init().
 // xregs is the memory address at which the
@@ -29,7 +30,8 @@ e1000_init(uint32 *xregs)
 {
   int i;
 
-  initlock(&e1000_lock, "e1000");
+  initlock(&e1000_lock_rx, "e1000");
+  initlock(&e1000_lock_tx, "e1000");
 
   regs = xregs;
 
@@ -102,9 +104,46 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
+
+  // it is possible that the same process call transmit or have interrupt twice or one and one
+
+  //   
+
+  // needed, because maybe have more than one process send, it need to modify e1000's register and descriptor
+  acquire(&e1000_lock_tx);
+
+  int idx = regs[E1000_TDT];
   
+  // overflow => before this place, all place is used
+  if (idx == TX_RING_SIZE) return -1;
+
+  struct tx_desc * desc = &tx_ring[idx];
+
+  // hasn't finished the previous request
+  if ((desc->status & E1000_TXD_STAT_DD) == 0) return -1;
+  
+  // free last request
+  if (tx_mbufs[idx] != 0) 
+    mbuffree(tx_mbufs[idx]);
+
+  // set new request
+  desc->addr = (uint64)m->head;
+  desc->length = m->len;
+  // RS => for get E1000_TXD_STAT_DD
+  desc->cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
+  tx_mbufs[idx] = m;
+
+  // update ring position
+  regs[E1000_TDT] = (idx + 1) % TX_RING_SIZE;
+
+  release(&e1000_lock_tx);
+
   return 0;
 }
+
+
+extern void net_rx(struct mbuf *m);
+
 
 static void
 e1000_recv(void)
@@ -115,6 +154,38 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+
+  // needed, because maybe have more than one cpu receive this devintr, then race
+
+  acquire(&e1000_lock_rx);
+
+  int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  
+  struct rx_desc * desc = &rx_ring[idx];
+  struct mbuf * m = rx_mbufs[idx];
+
+  while ((desc->status & E1000_RXD_STAT_DD) != 0) {
+    m->len = desc->length;
+
+    // send this packet to upper level
+    net_rx(m);
+
+    m = mbufalloc(0);
+    rx_mbufs[idx] = m;
+    desc->status = 0; 
+    desc->addr = (uint64)m->head;
+
+    idx = (idx + 1) % RX_RING_SIZE;
+    
+    desc = &rx_ring[idx];
+    m = rx_mbufs[idx];
+  }
+
+  // update the rdt to the position that just processed
+  regs[E1000_RDT] = idx - 1;
+
+
+  release(&e1000_lock_rx);
 }
 
 void

@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "\"*.cpp\"": "\"c++\"",
+        "net.h": "c",
+        "spinlock.h": "c"
+    }
+}
